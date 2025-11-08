@@ -2,65 +2,87 @@ const express = require('express');
 const request = require('request');
 const app = express();
 
-// Servir archivos estáticos
-app.use(express.static('public'));
+// Middleware para permitir todo
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', '*');
+  res.header('Access-Control-Allow-Methods', '*');
+  next();
+});
 
-// Proxy para PJUD
-app.use('/proxy', (req, res) => {
-  const targetUrl = `https://oficinajudicialvirtual.pjud.cl${req.url.replace('/proxy', '')}`;
+// Proxy más inteligente
+app.use('/pjud', (req, res) => {
+  const path = req.url.replace('/pjud', '') || '/';
+  const targetUrl = `https://oficinajudicialvirtual.pjud.cl${path}`;
   
-  console.log('🔗 Proxying to:', targetUrl);
+  console.log('🎯 Proxy a:', targetUrl);
   
   const options = {
     url: targetUrl,
+    method: req.method,
     headers: {
-      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-      'Accept-Language': 'es-CL,es;q=0.9',
+      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Language': 'es-CL,es;q=0.9,en;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
       'X-Forwarded-For': '190.110.124.130',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-    }
+      'Referer': 'https://oficinajudicialvirtual.pjud.cl/',
+      'Host': 'oficinajudicialvirtual.pjud.cl'
+    },
+    gzip: true,
+    followRedirect: true,
+    followAllRedirects: true
   };
-  
-  request(options)
-    .on('error', (err) => {
-      console.log('❌ Error:', err.message);
-      res.status(500).send('Error de conexión: ' + err.message);
-    })
-    .pipe(res);
+
+  // Copiar headers del request original
+  Object.keys(req.headers).forEach(key => {
+    if (!['host', 'connection'].includes(key.toLowerCase())) {
+      options.headers[key] = req.headers[key];
+    }
+  });
+
+  try {
+    const proxyRequest = request(options);
+    
+    proxyRequest.on('response', (response) => {
+      console.log('✅ Respuesta:', response.statusCode);
+      
+      // Copiar headers de respuesta
+      Object.keys(response.headers).forEach(key => {
+        res.setHeader(key, response.headers[key]);
+      });
+      
+      // Remover headers de seguridad que bloquean
+      res.removeHeader('content-security-policy');
+      res.removeHeader('x-frame-options');
+    });
+    
+    proxyRequest.on('error', (err) => {
+      console.log('❌ Error de proxy:', err.message);
+      res.status(500).send(`Error de proxy: ${err.message}`);
+    });
+    
+    proxyRequest.pipe(res);
+    
+  } catch (error) {
+    console.log('💥 Error crítico:', error);
+    res.status(500).send('Error crítico: ' + error.message);
+  }
 });
 
-// Página principal con iframe
+// Redirección directa
 app.get('/', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Acceso PJUD - GitHub Codespaces</title>
-        <style>
-            body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
-            iframe { width: 100%; height: 80vh; border: 2px solid #0366d6; }
-            .info { background: #f6f8fa; padding: 15px; border-radius: 6px; margin-bottom: 15px; }
-        </style>
-    </head>
-    <body>
-        <div class="info">
-            <h2>🔑 Proxy para Clave Única - Chile</h2>
-            <p>Este servidor actúa como intermediario desde GitHub Codespaces</p>
-        </div>
-        <iframe src="/proxy/" id="pjudFrame"></iframe>
-        <script>
-            // Recargar iframe si hay errores
-            document.getElementById('pjudFrame').onload = function() {
-                console.log('Iframe cargado correctamente');
-            };
-        </script>
-    </body>
-    </html>
-  `);
+  res.redirect('/pjud/');
+});
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', message: 'Proxy funcionando' });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('🚀 Proxy corriendo en: http://localhost:' + PORT);
-  console.log('📌 Accede via: https://' + process.env.CODESPACE_NAME + '-3000.app.github.dev');
+  console.log('🚀 Proxy MEJORADO corriendo en puerto:', PORT);
+  console.log('📌 URL principal: https://' + process.env.CODESPACE_NAME + '-' + PORT + '.app.github.dev');
+  console.log('🎯 Acceso directo a PJUD: /pjud/');
 });
