@@ -1,0 +1,13 @@
+{
+  "name": "proxy-chile-codespace",
+  "version": "1.0.0",
+  "description": "Proxy para acceder a Clave Única desde Venezuela",
+  "main": "proxy.js",
+  "scripts": {
+    "start": "node proxy.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "request": "^2.88.0"
+  }
+}
