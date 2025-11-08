@@ -2,87 +2,76 @@ const express = require('express');
 const request = require('request');
 const app = express();
 
-// Middleware para permitir todo
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', '*');
-  res.header('Access-Control-Allow-Methods', '*');
-  next();
-});
+// Headers de navegador real
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+  'Accept-Language': 'es-CL,es;q=0.9,en;q=0.8',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Cache-Control': 'no-cache',
+  'Connection': 'keep-alive',
+  'Upgrade-Insecure-Requests': '1',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-User': '?1'
+};
 
-// Proxy más inteligente
-app.use('/pjud', (req, res) => {
-  const path = req.url.replace('/pjud', '') || '/';
-  const targetUrl = `https://oficinajudicialvirtual.pjud.cl${path}`;
+// Proxy stealth
+app.use('/', (req, res) => {
+  const targetUrl = `https://oficinajudicialvirtual.pjud.cl${req.url}`;
   
-  console.log('🎯 Proxy a:', targetUrl);
+  console.log('🎯 Intentando acceder a:', targetUrl);
   
   const options = {
     url: targetUrl,
     method: req.method,
     headers: {
-      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-      'Accept-Language': 'es-CL,es;q=0.9,en;q=0.8',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'X-Forwarded-For': '190.110.124.130',
+      ...BROWSER_HEADERS,
+      'Host': 'oficinajudicialvirtual.pjud.cl',
       'Referer': 'https://oficinajudicialvirtual.pjud.cl/',
-      'Host': 'oficinajudicialvirtual.pjud.cl'
+      'X-Forwarded-For': '190.110.124.130'
     },
     gzip: true,
+    timeout: 10000,
     followRedirect: true,
-    followAllRedirects: true
+    followAllRedirects: true,
+    strictSSL: false
   };
 
-  // Copiar headers del request original
-  Object.keys(req.headers).forEach(key => {
-    if (!['host', 'connection'].includes(key.toLowerCase())) {
-      options.headers[key] = req.headers[key];
-    }
-  });
-
-  try {
-    const proxyRequest = request(options);
-    
-    proxyRequest.on('response', (response) => {
-      console.log('✅ Respuesta:', response.statusCode);
-      
-      // Copiar headers de respuesta
-      Object.keys(response.headers).forEach(key => {
-        res.setHeader(key, response.headers[key]);
-      });
-      
-      // Remover headers de seguridad que bloquean
-      res.removeHeader('content-security-policy');
-      res.removeHeader('x-frame-options');
-    });
-    
-    proxyRequest.on('error', (err) => {
-      console.log('❌ Error de proxy:', err.message);
-      res.status(500).send(`Error de proxy: ${err.message}`);
-    });
-    
-    proxyRequest.pipe(res);
-    
-  } catch (error) {
-    console.log('💥 Error crítico:', error);
-    res.status(500).send('Error crítico: ' + error.message);
+  // Manejar datos POST
+  if (req.method === 'POST' && req.headers['content-type']) {
+    options.headers['Content-Type'] = req.headers['content-type'];
+    req.pipe(request(options)).pipe(res);
+  } else {
+    request(options)
+      .on('response', (response) => {
+        console.log('📡 Status:', response.statusCode);
+        console.log('📦 Headers:', JSON.stringify(response.headers, null, 2));
+        
+        // Remover headers de seguridad pero mantener otros
+        const safeHeaders = { ...response.headers };
+        delete safeHeaders['content-security-policy'];
+        delete safeHeaders['x-frame-options'];
+        delete safeHeaders['x-content-type-options'];
+        
+        res.writeHead(response.statusCode, safeHeaders);
+      })
+      .on('error', (err) => {
+        console.log('❌ Error:', err.message);
+        res.status(500).send(`
+          <h1>Error de Conexión</h1>
+          <p>El servidor de Chile está bloqueando el acceso.</p>
+          <p><strong>Support ID:</strong> 12052784506492765553</p>
+          <p>Esto indica que hay un firewall activo bloqueando proxies.</p>
+        `);
+      })
+      .pipe(res);
   }
-});
-
-// Redirección directa
-app.get('/', (req, res) => {
-  res.redirect('/pjud/');
-});
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Proxy funcionando' });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('🚀 Proxy MEJORADO corriendo en puerto:', PORT);
-  console.log('📌 URL principal: https://' + process.env.CODESPACE_NAME + '-' + PORT + '.app.github.dev');
-  console.log('🎯 Acceso directo a PJUD: /pjud/');
+  console.log('🕵️  Proxy STEALTH corriendo en puerto:', PORT);
+  console.log('🔗 URL: https://' + process.env.CODESPACE_NAME + '-' + PORT + '.app.github.dev');
 });
